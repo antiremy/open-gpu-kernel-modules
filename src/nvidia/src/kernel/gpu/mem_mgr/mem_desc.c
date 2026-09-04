@@ -3847,7 +3847,10 @@ _memdescReleaseIommuMapping
     }
 
     listRemove(&pMemDesc->iommuMappings, pIovaMapping);
-    iovaspaceDestroyMapping(iovaspaceFromMapping(pIovaMapping), pIovaMapping);
+    OBJIOVASPACE *pIOVAS = iovaspaceFromMapping(pIovaMapping);
+
+    if (pIOVAS != NULL)
+        iovaspaceDestroyMapping(pIOVAS, pIovaMapping);
 
     if (pParentIovaMapping != NULL)
         _memdescReleaseIommuMapping(pParentIovaMapping, NV_FALSE);
