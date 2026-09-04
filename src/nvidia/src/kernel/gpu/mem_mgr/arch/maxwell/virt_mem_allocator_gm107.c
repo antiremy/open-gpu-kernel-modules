@@ -1741,6 +1741,8 @@ _gmmuWalkCBMapNextEntries_Direct
             {
                 pIter->physAddr = dmaPageArrayGetPhysAddr(pIter->pPageArray, currIdxMod);
 
+                if (pageSize < pTarget->pageArrayGranularity)
+                    pIter->physAddr -= pIter->pPageArray->PteAdjust;
                 pIter->physAddr += pIter->currPageOffset;
                 // Hack to WAR submemesc mappings
                 pIter->physAddr = NV_ALIGN_DOWN64(pIter->physAddr, pageSize);
@@ -1871,7 +1873,7 @@ _gmmuWalkCBMapNextEntries_Direct
         // pPageArray deals pages with granularity `pTarget->pageArrayGranularity`.
         // So increment by the ratio of mapping page size to `pTarget->pageArrayGranularity`
         //
-        if (SYS_GET_INSTANCE()->bEnableDynamicGranularityPageArrays && pageSize < pTarget->pageArrayGranularity)
+        if (pageSize < pTarget->pageArrayGranularity)
         {
             pIter->currPageOffset += pageSize;
             if (pIter->currPageOffset >= pTarget->pageArrayGranularity)
@@ -2153,7 +2155,8 @@ dmaUpdateVASpace_GF100
     // encounter a case where a larger page granularity physical surface gets
     // represented by a smaller granularity pageArray.
     //
-    if (!SYS_GET_INSTANCE()->bEnableDynamicGranularityPageArrays)
+    if (!SYS_GET_INSTANCE()->bEnableDynamicGranularityPageArrays &&
+        (pMemDesc == NULL || pageSize > pMemDesc->pageArrayGranularity))
     {
         //
         // VMM-TODO: Merge into PL1 traveral.
@@ -2258,6 +2261,8 @@ dmaUpdateVASpace_GF100
         //MMU_MAP_ITER
         mapIter.pFmt            = pFmt;
         mapIter.pPageArray      = pPageArray;
+        if (pageSize < pMemDesc->pageArrayGranularity && pPageArray != NULL)
+            mapIter.currPageOffset = pPageArray->PteAdjust;
         mapIter.surfaceOffset   = surfaceOffset;
         mapIter.comprInfo       = *pComprInfo;
         mapIter.bReadPtes       = readPte;
