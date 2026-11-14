@@ -1,25 +1,27 @@
-# NVIDIA driver 620.70.06 with P2P for RTX 30, 40, and 50 series
+# NVIDIA driver 620.70.06 with P2P patches
 
-Patched NVIDIA kernel modules for GPU-to-GPU transfers over PCIe BAR1 or NVLink,
-including between generations. No extra NVIDIA module parameters are needed.
+Patched NVIDIA kernel modules for GPU-to-GPU transfers over PCIe BAR1 or NVLink.
+No extra NVIDIA module parameters are needed.
 
 Based on [tinygrad's P2P patch](https://github.com/tinygrad/open-gpu-kernel-modules/blob/550.54.15-p2p/README.md).
 
 ## Supported configurations
 
-The patch supports RTX 30-, 40-, and 50-series GPUs, including models below the
-3090, 4090, and 5090.
+Tested on 620.70.06: RTX 3090 and RTX 3060 (Ampere only), over PCIe BAR1.
+- RTX 3090 to RTX 3090: P2P works.
+- RTX 3060 to RTX 3060: P2P works.
+- RTX 3090 to RTX 3060: P2P works only after the `libcuda` patch below.
+
+Not tested on 620.70.06: Turing, Ada, Hopper, Blackwell, NVLink, and mixed generations.
+The patched system `libcuda` was checked on these pairs, and 3090 to 3060 P2P works.
+The code carries over from the 615.78.08 branch, where those were reported to work.
 
 For PCIe P2P, each GPU needs Resizable BAR and a BAR1 aperture large enough to map
 its usable VRAM. The IOMMU must be configured for passthrough. Consumer Turing
 (RTX 20 series) is not supported by the BAR1 path.
 
-Same-generation pairs only need the patched kernel modules. The models can differ,
-such as RTX 5090 and RTX PRO 6000 Blackwell. Mixed-generation pairs, such as RTX 3090
-and RTX 5090, also need the `libcuda` patch below.
-
-NVLink is used where available; other pairs use PCIe BAR1. This also works in systems
-with both NVLink-connected pairs and GPUs without NVLink.
+Pairs of different chips need the `libcuda` patch, even in the same generation.
+Without it, `cuDeviceCanAccessPeer` returns 0 for a 3090 and a 3060.
 
 ## How it works
 
@@ -42,10 +44,14 @@ separate console mapping.
    - Run `sudo update-grub`
 3. Install the [NVIDIA 620.70.06 driver](https://download.nvidia.com/XFree86/Linux-x86_64/620.70.06/NVIDIA-Linux-x86_64-620.70.06.run).
 4. Run `./install.sh` in this repo.
-5. For mixed-generation P2P, back up and patch the system `libcuda` as described below.
+5. For pairs of different GPU models, back up and patch the system `libcuda` as described below.
 6. Reboot the server.
 
-## Mixed-generation `libcuda` patch
+## `libcuda` patch for different GPU models
+
+The script matches byte signatures in the 620.70.06 `libcuda`. It stops with an error if
+any signature is missing, so it will not work on other driver versions.
+The patch was checked on a 3090 and 3060 pair only.
 
 Set `LIBCUDA` to your installed library, back it up, and run
 [`patch-libcuda-p2p.py`](patch-libcuda-p2p.py):
@@ -67,10 +73,14 @@ options nvidia NVreg_RegistryDwords="RMForceP2PType=1"
 
 ## Experimental: faster cudaHostRegister for hugepage-backed memory
 
-An experimental fast path speeds up `cudaHostRegister` for buffers backed by hugetlb
+An experimental fast path is meant to speed up `cudaHostRegister` for buffers backed by hugetlb
 pages (including 2 MiB and 1 GiB) and reduces their device page tables. It is enabled
 automatically for hugepage-aligned buffers covering whole hugepages within one VMA.
 Transparent hugepages and other layouts use the normal registration path.
+On 620.70.06 it was checked with 2 MiB hugetlb buffers on an RTX 3090 and an RTX 3060.
+Registration, copy to the GPU, and copy back gave matching SHA-256 sums, including a
+buffer that did not start on a hugepage boundary. The speedup was not measured.
+1 GiB pages were not tested.
 
 ## Potential issues
 
