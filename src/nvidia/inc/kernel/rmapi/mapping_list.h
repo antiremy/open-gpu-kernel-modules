@@ -65,6 +65,7 @@ struct _def_client_dma_mapping_info
     ADDRESS_TRANSLATION   addressTranslation;
     MEMORY_DESCRIPTOR    *pBar1P2PVirtMemDesc;              // The peer GPU mapped BAR1 region
     MEMORY_DESCRIPTOR    *pBar1P2PPhysMemDesc;              // The peer GPU vidmem sub region
+    NvU64                 bar1P2PApertureOffset;             // Offset of the dynamic peer mapping in BAR1
 };
 
 //

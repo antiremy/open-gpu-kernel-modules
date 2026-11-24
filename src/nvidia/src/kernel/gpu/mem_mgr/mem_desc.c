@@ -2254,6 +2254,10 @@ memdescCreateSubMem
     MEMORY_DESCRIPTOR *pMemDescNew;
     NvU64 OffsetAdjust;
     NvU64 tmpEnd;
+    NvU64 descriptorSize = Size;
+    NvBool bNativePageArray =
+        memdescGetFlag(pMemDesc, MEMDESC_FLAGS_EXT_PAGE_ARRAY_MEM) &&
+        pMemDesc->pageArrayGranularity > RM_PAGE_SIZE;
 
     NV_ASSERT_OR_RETURN(Offset < pMemDesc->Size, NV_ERR_INVALID_ARGUMENT);
     NV_ASSERT_OR_RETURN(Size != 0, NV_ERR_INVALID_ARGUMENT);
@@ -2265,8 +2269,16 @@ memdescCreateSubMem
         pGpu = pMemDesc->pGpu;
     }
 
+    if (bNativePageArray)
+    {
+        NvU64 granularity = pMemDesc->pageArrayGranularity;
+        NvU64 adjust = (pMemDesc->PteAdjust + Offset) & (granularity - 1);
+
+        descriptorSize = (NV_ALIGN_UP64(adjust + Size, granularity) / granularity) * RM_PAGE_SIZE;
+    }
+
     // Allocate the new MEMORY_DESCRIPTOR
-    status = memdescCreate(&pMemDescNew, pGpu, Size, 0,
+    status = memdescCreate(&pMemDescNew, pGpu, descriptorSize, 0,
                            !!(pMemDesc->_flags & MEMDESC_FLAGS_PHYSICALLY_CONTIGUOUS),
                            pMemDesc->_addressSpace,
                            pMemDesc->_cpuCacheAttrib,
@@ -2333,7 +2345,11 @@ memdescCreateSubMem
         pMemDescNew->PteAdjust = OffsetAdjust & pageArrayGranularityMask;
 
         PageCount = NV_ALIGN_UP64(pMemDescNew->PteAdjust + Size, pageArrayGranularity) >> pageArrayGranularityShift;
-        memdescFillPages(pMemDescNew, 0, &pMemDesc->_pteArray[PageIndex], PageCount, pageArrayGranularity);
+        if (bNativePageArray)
+            _memdescFillPagesAtNativeGranularity(pMemDescNew, 0,
+                &pMemDesc->_pteArray[PageIndex], PageCount, pageArrayGranularity);
+        else
+            memdescFillPages(pMemDescNew, 0, &pMemDesc->_pteArray[PageIndex], PageCount, pageArrayGranularity);
     }
 
     if (memdescIsEgm(pMemDesc))
@@ -3875,7 +3891,10 @@ _memdescReleaseIommuMapping
     }
 
     listRemove(&pMemDesc->iommuMappings, pIovaMapping);
-    iovaspaceDestroyMapping(iovaspaceFromMapping(pIovaMapping), pIovaMapping);
+    OBJIOVASPACE *pIOVAS = iovaspaceFromMapping(pIovaMapping);
+
+    if (pIOVAS != NULL)
+        iovaspaceDestroyMapping(pIOVAS, pIovaMapping);
 
     if (pParentIovaMapping != NULL)
         _memdescReleaseIommuMapping(pParentIovaMapping, NV_FALSE);

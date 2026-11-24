@@ -3918,6 +3918,7 @@ osIovaMap
     NvBool bIsContig;
     NV_ADDRESS_SPACE addressSpace;
     NvU32 osPageCount;
+    NvBool bHugePages;
 
     if (pIovaMapping == NULL)
     {
@@ -3975,7 +3976,13 @@ osIovaMap
         return NV_OK;
     }
 
-    if (IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
+    bHugePages = memdescGetFlag(pIovaMapping->pPhysMemDesc, MEMDESC_FLAGS_EXT_PAGE_ARRAY_MEM) &&
+                pIovaMapping->pPhysMemDesc->pageArrayGranularity > os_page_size;
+    if (bHugePages)
+    {
+        osPageCount = pIovaMapping->pPhysMemDesc->PageCount;
+    }
+    else if (IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
     {
         osPageCount = pIovaMapping->pPhysMemDesc->PageCount;
         NV_ASSERT_OR_RETURN(os_page_size == pIovaMapping->pPhysMemDesc->pageArrayGranularity, NV_ERR_INVALID_PARAMETER);
@@ -4016,11 +4023,11 @@ osIovaMap
     //
     peer = NV_GET_NV_STATE(pRootMemDesc->pGpu);
     bIsContig = memdescGetContiguity(pIovaMapping->pPhysMemDesc, AT_CPU);
-    if (IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
+    if (!bHugePages && IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
     {
         NV_ASSERT_OR_RETURN(pIovaMapping->pPhysMemDesc->pageArrayGranularity == os_page_size, NV_ERR_INVALID_ARGUMENT);
     }
-    else if (NV_RM_PAGE_SIZE < os_page_size && !bIsContig)
+    else if (!bHugePages && NV_RM_PAGE_SIZE < os_page_size && !bIsContig)
     {
         RmDeflateRmToOsPageArray(&pIovaMapping->iovaArray[0],
                                 pIovaMapping->pPhysMemDesc->PageCount);
@@ -4113,11 +4120,11 @@ osIovaMap
     // If the OS layer doesn't think in RM page size, we need to inflate the
     // PTE array into RM pages.
     //
-    if (IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
+    if (!bHugePages && IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
     {
         NV_ASSERT_OR_RETURN(pIovaMapping->pPhysMemDesc->pageArrayGranularity == os_page_size, NV_ERR_INVALID_ARGUMENT);
     }
-    else if (NV_RM_PAGE_SIZE < os_page_size && !bIsContig)
+    else if (!bHugePages && NV_RM_PAGE_SIZE < os_page_size && !bIsContig)
     {
         RmInflateOsToRmPageArray(&pIovaMapping->iovaArray[0],
                                 pIovaMapping->pPhysMemDesc->PageCount);
@@ -4145,6 +4152,7 @@ osIovaUnmap
     void *pPriv;
     NV_STATUS status;
     NvU64 osPageCount;
+    NvBool bHugePages;
 
     if (pIovaMapping == NULL)
     {
@@ -4181,7 +4189,13 @@ osIovaUnmap
     {
         return;
     }
-    if (IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
+    bHugePages = memdescGetFlag(pIovaMapping->pPhysMemDesc, MEMDESC_FLAGS_EXT_PAGE_ARRAY_MEM) &&
+                pIovaMapping->pPhysMemDesc->pageArrayGranularity > os_page_size;
+    if (bHugePages)
+    {
+        osPageCount = pIovaMapping->pPhysMemDesc->PageCount;
+    }
+    else if (IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
     {
         osPageCount = pIovaMapping->pPhysMemDesc->PageCount;
         NV_ASSERT(os_page_size == pIovaMapping->pPhysMemDesc->pageArrayGranularity);
@@ -4206,11 +4220,11 @@ osIovaUnmap
     //
     pPriv = (void *)pIovaMapping->pOsData;
 
-    if (IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
+    if (!bHugePages && IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
     {
         NV_ASSERT(pIovaMapping->pPhysMemDesc->pageArrayGranularity == os_page_size);
     }
-    else if (NV_RM_PAGE_SIZE < os_page_size &&
+    else if (!bHugePages && NV_RM_PAGE_SIZE < os_page_size &&
             !memdescGetContiguity(pIovaMapping->pPhysMemDesc, AT_CPU))
     {
         RmDeflateRmToOsPageArray(&pIovaMapping->iovaArray[0],
@@ -4240,11 +4254,11 @@ osIovaUnmap
     // If the OS layer doesn't think in RM page size, we need to fluff out the
     // PTE array into RM pages.
     //
-    if (IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
+    if (!bHugePages && IS_DISCONTIG_AND_DYNGRAN_ENABLED(pIovaMapping->pPhysMemDesc))
     {
         NV_ASSERT(pIovaMapping->pPhysMemDesc->pageArrayGranularity == os_page_size);
     }
-    else if (NV_RM_PAGE_SIZE < os_page_size &&
+    else if (!bHugePages && NV_RM_PAGE_SIZE < os_page_size &&
             !memdescGetContiguity(pIovaMapping->pPhysMemDesc, AT_CPU))
     {
         RmInflateOsToRmPageArray(&pIovaMapping->iovaArray[0],
