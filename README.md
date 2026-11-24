@@ -62,6 +62,14 @@ sudo cp "$LIBCUDA" "$LIBCUDA.bak"
 sudo ./patch-libcuda-p2p.py "$LIBCUDA"
 ```
 
+To see if the signatures match without changing the file, add `--check` before the path.
+
+A daily GitHub Actions job ([`new-driver.yml`](.github/workflows/new-driver.yml)) watches for
+new NVIDIA releases. It cherry-picks these commits onto the new release tag, builds the
+modules, and runs the `--check` on that release's `libcuda`. If all of that passes, it pushes
+the plain tag as `<version>-p2p` and opens a pull request into it from `<version>-p2p-auto`.
+If anything fails, it opens an issue with a link to the run.
+
 ## Forcing 3090s to use PCIe instead of NVLink
 
 To use PCIe BAR1 even with an NVLink bridge installed, add this to

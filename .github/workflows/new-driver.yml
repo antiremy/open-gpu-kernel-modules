@@ -1,0 +1,113 @@
+name: New driver release
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+env:
+  NVIDIA_REPO: https://github.com/NVIDIA/open-gpu-kernel-modules.git
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.P2P_BOT_TOKEN || github.token }}
+
+      - name: Find new release
+        id: find
+        run: |
+          git fetch --no-tags --force "$NVIDIA_REPO" "+refs/tags/*:refs/tags/*"
+          base=$(git describe --tags --abbrev=0 --exclude '*-*' HEAD)
+          new=$(git tag -l | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' | sort -V | tail -1)
+          echo "base=$base new=$new"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          if [ "$new" = "$base" ]; then
+            echo "Already on the newest release."
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$new-p2p" > /dev/null; then
+            echo "Branch $new-p2p already exists."
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Apply P2P commits to the release tag
+        if: steps.find.outputs.run
+        env:
+          BASE: ${{ steps.find.outputs.base }}
+          NEW: ${{ steps.find.outputs.new }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          patches=$(git rev-parse HEAD)
+          git log --oneline "$BASE..$patches"
+          git switch -c "$NEW-p2p-auto" "$NEW"
+          git cherry-pick "$BASE..$patches"
+
+      - name: Build kernel modules
+        if: steps.find.outputs.run
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "linux-headers-$(uname -r)" zstd
+          make modules -j"$(nproc)"
+
+      - name: Check libcuda patch
+        if: steps.find.outputs.run
+        env:
+          NEW: ${{ steps.find.outputs.new }}
+        run: |
+          run="$RUNNER_TEMP/NVIDIA-Linux-x86_64-$NEW.run"
+          lib="libcuda.so.$NEW"
+          curl -fsSL -o "$run" "https://download.nvidia.com/XFree86/Linux-x86_64/$NEW/$(basename "$run")"
+          skip=$(head -n 20 "$run" | sed -n 's/^skip=//p')
+          tail -n +"$skip" "$run" | zstd -dc | tar -xf - -C "$RUNNER_TEMP" "$lib"
+          python3 patch-libcuda-p2p.py --check "$RUNNER_TEMP/$lib"
+
+      - name: Push branches
+        if: steps.find.outputs.run
+        env:
+          NEW: ${{ steps.find.outputs.new }}
+        run: git push --atomic origin "$NEW^{commit}:refs/heads/$NEW-p2p" "$NEW-p2p-auto"
+
+      - name: Open pull request
+        if: steps.find.outputs.run
+        env:
+          GH_TOKEN: ${{ secrets.P2P_BOT_TOKEN || github.token }}
+          BASE: ${{ steps.find.outputs.base }}
+          NEW: ${{ steps.find.outputs.new }}
+        run: |
+          gh pr create --repo "$GITHUB_REPOSITORY" --base "$NEW-p2p" --head "$NEW-p2p-auto" \
+            --title "P2P patches for $NEW" --body "$(cat <<EOF
+          \`$NEW-p2p\` is NVIDIA's $NEW tag. This adds the P2P commits from $BASE. It builds, and the libcuda patch found every signature.
+
+          Before merging:
+          - [ ] Test P2P on real GPUs
+          - [ ] Update the version in README.md and patch-libcuda-p2p.py
+
+          After merging with "Rebase and merge", make \`$NEW-p2p\` the default branch and delete \`$NEW-p2p-auto\`.
+
+          Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          EOF
+          )"
+
+      - name: Report failure
+        if: failure() && steps.find.outputs.run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW: ${{ steps.find.outputs.new }}
+        run: |
+          title="Driver $NEW: automatic P2P update failed"
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number -q '.[].number' | grep -q .; then
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "Applying the P2P commits, the build, the libcuda check, the push or the PR failed. See $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
