@@ -86,10 +86,14 @@ PATCHES = (
 )
 
 
-if len(sys.argv) != 2:
-    raise SystemExit(f"usage: {sys.argv[0]} LIBCUDA")
+args = sys.argv[1:]
+check_only = args[:1] == ["--check"]
+if check_only:
+    args = args[1:]
+if len(args) != 1:
+    raise SystemExit(f"usage: {sys.argv[0]} [--check] LIBCUDA")
 
-source = Path(sys.argv[1])
+source = Path(args[0])
 data = bytearray(source.read_bytes())
 changes = []
 
@@ -106,6 +110,11 @@ for name, signature, (branch, replacement) in PATCHES:
     offset = matches[0].start() + branch
     data[offset:offset + len(replacement)] = replacement
     changes.append((name, offset, replacement))
+
+if check_only:
+    for name, offset, _ in changes:
+        print(f"found: {name} at 0x{offset:x}")
+    raise SystemExit(0)
 
 with source.open("r+b") as library:
     for _, offset, replacement in changes:
